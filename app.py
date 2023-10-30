@@ -40,6 +40,8 @@ def load_files():
     
     skip_file = st.sidebar.checkbox('Skip file upload, use default', value=True)
     
+
+    
     df = None
     if uploaded_file is not None:
         df = read_and_parse_excel(uploaded_file, sheet_name=sheet_number, multiplier=multiplier)
@@ -69,6 +71,11 @@ def load_files():
         },
         
     )
+    
+    chart_data = edited_df[['Date', 'KVA', 'KW', 'KVAR']]
+    chart_data = chart_data.set_index('Date')
+    st.line_chart(chart_data)
+    
     csv = convert_df(edited_df)
     st.download_button(
         label="Download totals as csv",
