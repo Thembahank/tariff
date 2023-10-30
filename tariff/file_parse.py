@@ -48,7 +48,7 @@ def add_demand_slots(df):
 
 def aggregate_highest_kva(file_obj=None, sheet_range=(0, 6), multiplier=200000):
     """
-    Aggregates the highest total kVA across all meters for each sheet.
+    Aggregates the highest total kVA across all meters for each sheet and returns the original values.
 
     Parameters:
         file_obj (file object): The file object of the Excel file.
@@ -56,34 +56,38 @@ def aggregate_highest_kva(file_obj=None, sheet_range=(0, 6), multiplier=200000):
         multiplier (int): The multiplier for kVA.
 
     Returns:
-        pd.DataFrame: The aggregated DataFrame.
+        pd.DataFrame: The aggregated DataFrame containing the row with the highest total kVA.
     """
-    master_df = pd.DataFrame()
+    dfs = []  # List to hold individual DataFrames
 
     for i in range(sheet_range[0], sheet_range[1] + 1):
-        df = read_and_parse_excel(file_obj, sheet_name=i, multiplier=multiplier)
+        df = read_and_parse_excel(file_obj, sheet_name=i, multiplier=1)  # Note the multiplier is set to 1
         df['Meter'] = f'Mtr{i+1}'
-        master_df = pd.concat([master_df, df], ignore_index=True)
+        df.rename(columns={'KVA': 'KVA_value'}, inplace=True)
+        dfs.append(df)
 
-    # Ensure each combination of Date and Meter is unique by summing KVA values
-    master_df = master_df.groupby(['Date', 'Meter'])['KVA'].sum().reset_index()
+    # Concatenate all DataFrames
+    master_df = pd.concat(dfs, ignore_index=True)
 
-    # Group by Date and sum the kVA values
-    total_kva = master_df.groupby('Date')['KVA'].sum().reset_index()
+    # Pivot table to get 'Meter' as columns and sum of 'KVA_value' as values
+    pivot_df = master_df.pivot_table(values='KVA_value', index='Date', columns='Meter', aggfunc='sum', fill_value=0)
 
-    # Find the Date with the highest total kVA
-    highest_kva_date = total_kva.loc[total_kva['KVA'].idxmax(), 'Date']
+    # Reset index for the pivot table
+    pivot_df.reset_index(inplace=True)
 
-    # Filter the master DataFrame to only include rows with the highest total kVA Date
-    highest_kva_df = master_df[master_df['Date'] == highest_kva_date]
+    # Calculate the total kVA
+    pivot_df['Total kVA'] = pivot_df.iloc[:, 1:].sum(axis=1)
 
-    # Pivot to make Meters as columns
-    final_df = highest_kva_df.pivot(index='Date', columns='Meter', values='KVA').reset_index()
-    final_df['Total kVA'] = final_df.iloc[:, 1:].sum(axis=1)
-    final_df['kVA x 200000'] = final_df['Total kVA'] * multiplier
+    # Find the row with the highest total kVA
+    highest_kva_row = pivot_df.loc[pivot_df['Total kVA'].idxmax()]
 
-    return final_df
+    # Convert to DataFrame and transpose for better readability
+    highest_kva_df = pd.DataFrame(highest_kva_row).transpose()
 
+    # Multiply only the 'Total kVA' by 200,000 for the highest row
+    highest_kva_df['kVA x 200000'] = highest_kva_df['Total kVA'] * multiplier
+
+    return highest_kva_df
 
 
 def read_and_parse_excel(file_obj=None, sheet_name=0, multiplier=200000):
