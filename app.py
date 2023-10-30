@@ -1,5 +1,21 @@
+import io
+
+import pandas as pd
 import streamlit as st
-from tariff.file_parse import read_and_parse_excel, aggregate_highest_kva
+from tariff.file_parse import read_and_parse_excel, aggregate_highest_kva, concate_all_sheets, max_kva
+
+
+def to_excel(df):
+    output = io.BytesIO()
+    writer = pd.ExcelWriter(output)
+    df.to_excel(writer, index=False, sheet_name='Sheet1')
+    excel_data = output.getvalue()
+    return excel_data
+
+@st.cache_data
+def convert_df(df):
+    # IMPORTANT: Cache the conversion to prevent computation on every rerun
+    return df.to_csv().encode('utf-8')
 
 
 def add_title():
@@ -17,7 +33,7 @@ def load_files():
     uploaded_file = st.sidebar.file_uploader("Upload your input CSV file", type=["csv", "xlsx", "xls"])
     
     st.sidebar.write('Sheet number must be between 0 -6 if you are using the default file')
-    sheet_number = st.sidebar.number_input('Sheet number', value=0)
+    sheet_number = st.sidebar.number_input('Sheet number', value=0, min_value=0, max_value=6)
     
     st.sidebar.write('multiplier must be a number')
     multiplier = st.sidebar.number_input('Multiplier', value=200000)
@@ -53,21 +69,29 @@ def load_files():
         },
         
     )
+    csv = convert_df(edited_df)
+    st.download_button(
+        label="Download totals as csv",
+        data=csv,
+        file_name='tariff.csv',
+        mime='text/csv',
+    )
     
     st.divider()
-    st.subheader('Totals KVA')
-    aggregated_df = None
-    if uploaded_file is not None:
-        aggregated_df = aggregate_highest_kva(file_obj=uploaded_file, sheet_range=(0, sheet_number), multiplier=multiplier)
-        print(df)
+    merged = concate_all_sheets()
+    st.subheader('KVA per meter')
+    st.write(merged)
     
-    if skip_file:
-        aggregated_df = aggregate_highest_kva(file_obj=None, sheet_range=(0, sheet_number), multiplier=multiplier)
-        print(df)
+    df_max = max_kva(merged)
+    st.subheader('Highest KVA')
+    st.write(df_max)
     
-    st.data_editor(
-        aggregated_df,
-        num_rows="dynamic",
+    csv = convert_df(df_max)
+    st.download_button(
+        label="Download data as CSV",
+        data=csv,
+        file_name='max-kva.csv',
+        mime='text/csv',
     )
 
 

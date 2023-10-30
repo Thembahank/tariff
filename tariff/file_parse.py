@@ -1,7 +1,6 @@
-from collections import defaultdict
 from datetime import datetime
-
 import pandas as pd
+
 from io import BytesIO
 
 from tariff.constants import HIGH_DEMAND, LOW_DEMAND
@@ -61,10 +60,13 @@ def aggregate_highest_kva(file_obj=None, sheet_range=(0, 6), multiplier=200000):
     dfs = []  # List to hold individual DataFrames
 
     for i in range(sheet_range[0], sheet_range[1] + 1):
-        df = read_and_parse_excel(file_obj, sheet_name=i, multiplier=1)  # Note the multiplier is set to 1
-        df['Meter'] = f'Mtr{i+1}'
-        df.rename(columns={'KVA': 'KVA_value'}, inplace=True)
-        dfs.append(df)
+        try:
+            df = read_and_parse_excel(file_obj, sheet_name=i, multiplier=1)  # Note the multiplier is set to 1
+            df['Meter'] = f'Mtr{i+1}'
+            df.rename(columns={'KVA': 'KVA_value'}, inplace=True)
+            dfs.append(df)
+        except Exception as e:
+            print("error", e)
 
     # Concatenate all DataFrames
     master_df = pd.concat(dfs, ignore_index=True)
@@ -90,6 +92,51 @@ def aggregate_highest_kva(file_obj=None, sheet_range=(0, 6), multiplier=200000):
     return highest_kva_df
 
 
+def concate_all_sheets(file_obj=None, sheet_range=(0, 5), multiplier=200000):
+    col_dfs = []  # List to hold individual columns
+    
+    for i in range(sheet_range[0], sheet_range[1] + 1):
+        try:
+            df = read_and_parse_excel(file_obj, sheet_name=i, multiplier=1)  # Note the multiplier is set to 1
+            meter_name = f'Mtr{i + 1}'
+            df.rename(columns={'KVA': 'KVA_value'}, inplace=True)
+            
+            # Take just the 'Date' and 'KVA_value' columns and rename 'KVA_value' to include the meter name
+            col_df = df[['Date', 'KVA_value']].copy()
+            col_df.rename(columns={'KVA_value': f'KVA_value_{meter_name}'}, inplace=True)
+            col_dfs.append(col_df)
+        except Exception as e:
+            print("error", e)
+    
+    # Concatenate all DataFrames by 'Date'
+    master_df = pd.concat(col_dfs, ignore_index=True)
+    
+    # Convert 'Date' to datetime and set as index
+    master_df['Date'] = pd.to_datetime(master_df['Date'])
+    master_df.set_index('Date', inplace=True)
+    
+    # Merge all columns based on 'Date'
+    master_df = master_df.groupby('Date').first()
+    
+    # Sum up all KVA_value columns
+    kva_cols = [col for col in master_df.columns if 'KVA_value_' in col]
+    master_df['Sum_KVA_value'] = master_df[kva_cols].sum(axis=1)
+    
+    # Multiply the summed up column by 200000
+    master_df['Sum_KVA_value_x200000'] = master_df['Sum_KVA_value'] * multiplier
+    
+    return master_df
+
+
+def max_kva(df):
+    # Find the index of the maximum value in the last column ('Sum_KVA_value_x200000')
+    max_idx = df['Sum_KVA_value_x200000'].idxmax()
+    # Get the row corresponding to this index
+    max_row = df.loc[max_idx]
+    
+    return max_row
+
+
 def read_and_parse_excel(file_obj=None, sheet_name=0, multiplier=200000):
     """
     Reads an Excel file from a file object and parses the table data into a DataFrame.
@@ -113,11 +160,13 @@ def read_and_parse_excel(file_obj=None, sheet_name=0, multiplier=200000):
     # Replace commas with dots in the numeric columns to ensure they are read as floats
     numeric_columns = ['KW', 'KVAR', 'KVA']
     for col in numeric_columns:
-        df[col] = df[col].apply(lambda x: float(str(x).replace(',', '.'))  if pd.notnull(x) else x)
-        df[col] = df[col] * multiplier
-    
-    # Convert the 'HEX' column to datetime format (the name seems to be 'HEX' based on your sample data)
-    df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y %H:%M')
-    df = add_demand_slots(df)
+        try:
+            df[col] = df[col].apply(lambda x: float(str(x).replace(',', '.'))  if pd.notnull(x) else x)
+            df[col] = df[col] * multiplier
+            # Convert the 'HEX' column to datetime format (the name seems to be 'HEX' based on your sample data)
+            df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y %H:%M')
+            df = add_demand_slots(df)
+        except Exception as e:
+            print("error", e)
     
     return df
