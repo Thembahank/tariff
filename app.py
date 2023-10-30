@@ -5,12 +5,23 @@ import streamlit as st
 from tariff.file_parse import read_and_parse_excel, aggregate_highest_kva, concate_all_sheets, max_kva
 
 
+def multi_excel(dfs):
+    # Specify the Excel writer and the file name
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Loop through the list of DataFrames and write each one to a different sheet
+        for index, df in enumerate(dfs):
+            df.to_excel(writer, sheet_name=f'Sheet_{index + 1}', index=False)
+    output.seek(0)
+    return output.read()
+
+
 def to_excel(df):
     output = io.BytesIO()
-    writer = pd.ExcelWriter(output)
-    df.to_excel(writer, index=False, sheet_name='Sheet1')
-    excel_data = output.getvalue()
-    return excel_data
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Sheet1', index=False)
+    output.seek(0)
+    return output.read()
 
 @st.cache_data
 def convert_df(df):
@@ -40,8 +51,6 @@ def load_files():
     
     skip_file = st.sidebar.checkbox('Skip file upload, use default', value=True)
     
-
-    
     df = None
     if uploaded_file is not None:
         df = read_and_parse_excel(uploaded_file, sheet_name=sheet_number, multiplier=multiplier)
@@ -50,6 +59,10 @@ def load_files():
     if skip_file:
         df = read_and_parse_excel(sheet_name=sheet_number, multiplier=multiplier)
         print(df)
+    
+    all_dfs = []
+    for i in range(0, 6):
+        all_dfs.append(read_and_parse_excel(sheet_name=i, multiplier=multiplier))
     
     st.subheader('Tariff table')
     edited_df = st.data_editor(
@@ -72,33 +85,64 @@ def load_files():
         
     )
     
+    st.divider()
+    
+    st.write('Chart')
     chart_data = edited_df[['Date', 'KVA', 'KW', 'KVAR']]
     chart_data = chart_data.set_index('Date')
     st.line_chart(chart_data)
     
-    csv = convert_df(edited_df)
+    
+    
+    st.write('Download sheet data')
+    excel_data_edited = to_excel(edited_df)
     st.download_button(
-        label="Download totals as csv",
-        data=csv,
-        file_name='tariff.csv',
-        mime='text/csv',
+        label="Download table to  Excel",
+        data=excel_data_edited,
+        file_name='all_sheets.xlsx',
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    
+    # write them all to excel
+    # button to download excel
+    button = st.toggle('Download all sheets as Excel')
+    if button:
+        st.write("Preparing to download all sheets as Excel")
+        excel_data = multi_excel(all_dfs)
+        st.write("Done preparing to download all sheets as Excel")
+        st.download_button(
+            label="Download All Sheets",
+            data=excel_data,
+            file_name='all_sheets.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+    
+    st.divider()
+    
+    st.subheader('KVA per meter')
+    merged = concate_all_sheets()
+    st.write(merged)
+    
+    excel_data = to_excel(merged)
+    st.download_button(
+        label="Download KVA per meter",
+        data=excel_data,
+        file_name='merged_kva.xlsx',
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
     
     st.divider()
-    merged = concate_all_sheets()
-    st.subheader('KVA per meter')
-    st.write(merged)
     
     df_max = max_kva(merged)
     st.subheader('Highest KVA')
     st.write(df_max)
     
-    csv = convert_df(df_max)
+    excel_data = to_excel(df_max)
     st.download_button(
-        label="Download data as CSV",
-        data=csv,
-        file_name='max-kva.csv',
-        mime='text/csv',
+        label="Download Max KVA as Excel",
+        data=excel_data,
+        file_name='max_kva.xlsx',
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
 
 
